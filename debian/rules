@@ -1,0 +1,9 @@
+#!/usr/bin/make -f
+
+# Tests fail to build with out-of-memory error.
+# This has been reported as a GHC bug here:
+# https://ghc.haskell.org/trac/ghc/ticket/13535
+DEB_ENABLE_TESTS = no
+
+include /usr/share/cdbs/1/rules/debhelper.mk
+include /usr/share/cdbs/1/class/hlibrary.mk

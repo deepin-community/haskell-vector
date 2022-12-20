@@ -1,0 +1,271 @@
+haskell-vector (0.12.1.2-deepin1) unstable; urgency=medium
+
+  * Rebuild
+
+ -- Deepin Packages Builder <packages@deepin.org>  Mon, 14 Nov 2022 17:42:32 +0800
+
+haskell-vector (0.12.1.2-2) unstable; urgency=medium
+
+  * Fix Build-Depends.
+
+ -- Clint Adams <clint@debian.org>  Mon, 01 Jun 2020 09:10:07 -0400
+
+haskell-vector (0.12.1.2-1) unstable; urgency=medium
+
+  * New upstream version.
+
+ -- Clint Adams <clint@debian.org>  Sat, 30 May 2020 11:43:06 -0400
+
+haskell-vector (0.12.0.3-2) unstable; urgency=medium
+
+  * Bump quickcheck dependencies according to patch
+
+ -- Gianfranco Costamagna <locutusofborg@debian.org>  Mon, 05 Aug 2019 08:09:22 +0200
+
+haskell-vector (0.12.0.3-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Clint Adams <clint@debian.org>  Sat, 27 Jul 2019 19:25:52 -0400
+
+haskell-vector (0.12.0.1-8) unstable; urgency=medium
+
+  * Disable tests on all architectures due to a GHC bug
+
+ -- Ilias Tsitsimpis <iliastsi@debian.org>  Sun, 14 Oct 2018 00:44:06 +0300
+
+haskell-vector (0.12.0.1-7) unstable; urgency=medium
+
+  * Disable tests on i386, riscv64, alpha, hurd-i386, and x32 because
+    they fail to build with out-of-memory error.
+
+ -- Ilias Tsitsimpis <iliastsi@debian.org>  Fri, 12 Oct 2018 16:33:14 +0300
+
+haskell-vector (0.12.0.1-6) unstable; urgency=medium
+
+  [ Clint Adams ]
+  * Set Rules-Requires-Root to no.
+
+  [ Ilias Tsitsimpis ]
+  * Bump debhelper compat level to 10
+
+ -- Ilias Tsitsimpis <iliastsi@debian.org>  Sun, 30 Sep 2018 21:24:38 +0300
+
+haskell-vector (0.12.0.1-5) unstable; urgency=medium
+
+  * Disable tests on armel, armhf, mips, mips64el, and mipsel
+    because they are terrible.
+
+ -- Clint Adams <clint@debian.org>  Sun, 15 Apr 2018 17:14:11 -0400
+
+haskell-vector (0.12.0.1-4) unstable; urgency=medium
+
+  * Patch for newer base and QuickCheck.
+
+ -- Clint Adams <clint@debian.org>  Sat, 14 Apr 2018 00:40:27 -0400
+
+haskell-vector (0.12.0.1-3) unstable; urgency=medium
+
+  [ Ilias Tsitsimpis ]
+  * Change Priority to optional. Since Debian Policy version 4.0.1,
+    priority extra has been deprecated.
+  * Use the HTTPS form of the copyright-format URL
+  * Modify d/watch and Source field in d/copyright to use HTTPS
+  * Declare compliance with Debian policy 4.1.1
+  * Use salsa.debian.org URLs in Vcs-{Browser,Git} fields
+
+  [ Clint Adams ]
+  * Bump to Standards-Version 4.1.4.
+
+ -- Clint Adams <clint@debian.org>  Mon, 09 Apr 2018 20:05:09 -0400
+
+haskell-vector (0.12.0.1-2) unstable; urgency=medium
+
+  * Use SSE2 for floating-point operations on i386 (Closes: #875396)
+  * Update d/copyright file
+    - Bump copyright years
+    - Add Debian contributors under debian/* files
+
+ -- Ilias Tsitsimpis <iliastsi@debian.org>  Fri, 20 Oct 2017 17:14:32 +0300
+
+haskell-vector (0.12.0.1-1) unstable; urgency=medium
+
+  * New upstream release (Closes: #874805)
+  * Drop patches newer-base-and-ghc-prim, newer-quickcheck
+    Obsoleted by upstream changes.
+
+ -- Sean Whitton <spwhitton@spwhitton.name>  Sat, 09 Sep 2017 16:14:29 -0700
+
+haskell-vector (0.11.0.0-8) unstable; urgency=medium
+
+  * Patch for newer QuickCheck (drop duplicate instances).
+    closes: #867873.
+
+ -- Clint Adams <clint@debian.org>  Mon, 10 Jul 2017 07:51:17 -0400
+
+haskell-vector (0.11.0.0-7) unstable; urgency=medium
+
+  * Upload to unstable as part of GHC 8 transition.
+
+ -- Clint Adams <clint@debian.org>  Thu, 27 Oct 2016 18:36:49 -0400
+
+haskell-vector (0.11.0.0-6) experimental; urgency=medium
+
+  * Temporarily build-depend on ghc 8.
+  * Re-enable testsuite on all architectures.
+
+ -- Clint Adams <clint@debian.org>  Thu, 13 Oct 2016 03:09:25 -0400
+
+haskell-vector (0.11.0.0-5) unstable; urgency=high
+
+  * Also disable testsuite on kfreebsd-i386 and s390x.
+
+ -- Clint Adams <clint@debian.org>  Mon, 08 Aug 2016 10:14:42 -0400
+
+haskell-vector (0.11.0.0-4) unstable; urgency=medium
+
+  * Disable testsuite on armel/armhf/mips/mipsel/mips64el
+    instead.
+
+ -- Clint Adams <clint@debian.org>  Fri, 05 Aug 2016 13:14:14 -0400
+
+haskell-vector (0.11.0.0-3) unstable; urgency=medium
+
+  * Try to cope with low-memory issues on
+    armel/armhf/mips/mipsel/mips64el.
+
+ -- Clint Adams <clint@debian.org>  Thu, 04 Aug 2016 15:28:13 -0400
+
+haskell-vector (0.11.0.0-2) unstable; urgency=medium
+
+  [ Dmitry Bogatov ]
+  * Use secure (https) uri in Vcs-Git field in 'debian/control'
+  * Bump standards version to 3.9.8 (no changes needed)
+
+  [ Clint Adams ]
+  * Patch for newer base/ghc-prim.
+  * Re-enable testsuite.
+
+ -- Clint Adams <clint@debian.org>  Thu, 28 Jul 2016 13:01:59 -0400
+
+haskell-vector (0.11.0.0-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Clint Adams <clint@debian.org>  Sun, 10 Jan 2016 21:10:33 -0500
+
+haskell-vector (0.10.12.3-4) unstable; urgency=medium
+
+  [ Joachim Breitner ]
+  * Add Uploaders field, which I accidentally dropped
+
+  [ Clint Adams ]
+  * Switch Vcs-Git/Vcs-Browser headers to new location.
+
+ -- Clint Adams <clint@debian.org>  Thu, 03 Dec 2015 14:55:13 -0500
+
+haskell-vector (0.10.12.3-3) experimental; urgency=medium
+
+  * Bump standards-version to 3.9.6
+  * Depend on haskell-devscripts >= 0.10 to ensure that this package
+    builds against GHC in experimental
+
+ -- Joachim Breitner <nomeata@debian.org>  Thu, 20 Aug 2015 10:28:58 +0200
+
+haskell-vector (0.10.12.3-2) unstable; urgency=medium
+
+  * Upload to unstable
+
+ -- Joachim Breitner <nomeata@debian.org>  Mon, 27 Apr 2015 11:54:44 +0200
+
+haskell-vector (0.10.12.3-1) experimental; urgency=medium
+
+  * New upstream release
+
+ -- Joachim Breitner <nomeata@debian.org>  Thu, 16 Apr 2015 15:11:04 +0200
+
+haskell-vector (0.10.12.2-1) experimental; urgency=low
+
+  * Adjust watch file to new hackage layout
+  * Depend on haskell-devscripts 0.9, found in experimental
+  * New upstream release
+
+ -- Joachim Breitner <nomeata@debian.org>  Sat, 20 Dec 2014 17:12:33 +0100
+
+haskell-vector (0.10.0.1-3) unstable; urgency=low
+
+  * Move Haskell blurb to the end of the description, reduces the impact
+    of #708703
+
+ -- Joachim Breitner <nomeata@debian.org>  Sat, 25 May 2013 23:52:52 +0200
+
+haskell-vector (0.10.0.1-2) unstable; urgency=low
+
+  * Enable compat level 9
+  * Use substvars for Haskell description blurbs
+
+ -- Joachim Breitner <nomeata@debian.org>  Fri, 24 May 2013 12:52:24 +0200
+
+haskell-vector (0.10.0.1-1) experimental; urgency=low
+
+  * New upstream release (Closes: 695487)
+
+ -- Joachim Breitner <nomeata@debian.org>  Sun, 09 Dec 2012 11:02:22 +0100
+
+haskell-vector (0.9.1-3) experimental; urgency=low
+
+  * Depend on haskell-devscripts 0.8.13 to ensure this packages is built
+    against experimental
+  * Bump standards version, no change
+
+ -- Joachim Breitner <nomeata@debian.org>  Sun, 14 Oct 2012 12:02:23 +0200
+
+haskell-vector (0.9.1-2) unstable; urgency=low
+
+  * Last release lost the debian/patches/series file, re-adding it.
+
+ -- Joachim Breitner <nomeata@debian.org>  Fri, 10 Feb 2012 23:45:15 +0100
+
+haskell-vector (0.9.1-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Joachim Breitner <nomeata@debian.org>  Mon, 06 Feb 2012 17:23:05 +0100
+
+haskell-vector (0.9-2) unstable; urgency=low
+
+  * Disable annotation if GHCI is not available. Needs latest
+    haskell-devscripts. (Closes: #640088)
+
+ -- Joachim Breitner <nomeata@debian.org>  Sun, 04 Sep 2011 19:32:45 +0200
+
+haskell-vector (0.9-1) unstable; urgency=low
+
+  [ Joachim Breitner ]
+  * Add Max Bolingbroke in debian/copright
+
+  [ Iulian Udrea ]
+  * New upstream release.
+  * Update debian/copyright years.
+  * Bump dependencies.
+  * Add myself to Uploaders.
+  * Add DM-Upload-Allowed: yes.
+  * Bump Standards-Version to 3.9.2; no changes required.
+
+ -- Iulian Udrea <iulian@linux.com>  Tue, 30 Aug 2011 21:33:13 +0100
+
+haskell-vector (0.7.0.1-1) unstable; urgency=low
+
+  [ Marco Silva ]
+  * Use ghc instead of ghc6
+
+  [ Joachim Breitner ]
+  * New upstream release
+
+ -- Joachim Breitner <nomeata@debian.org>  Fri, 15 Apr 2011 18:59:15 +0530
+
+haskell-vector (0.6.0.1-1) unstable; urgency=low
+
+  * Initial release. (Closes: #582473)
+
+ -- Marco Túlio Gontijo e Silva <marcot@debian.org>  Fri, 21 May 2010 12:19:59 -0300
