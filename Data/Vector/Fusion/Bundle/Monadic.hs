@@ -13,7 +13,7 @@
 --
 
 module Data.Vector.Fusion.Bundle.Monadic (
-  Bundle(..), Chunk(..),
+  Bundle(..), Chunk(..), lift,
 
   -- * Size hints
   size, sized,
@@ -43,7 +43,7 @@ module Data.Vector.Fusion.Bundle.Monadic (
   eqBy, cmpBy,
 
   -- * Filtering
-  filter, filterM, takeWhile, takeWhileM, dropWhile, dropWhileM,
+  filter, filterM, mapMaybeM, takeWhile, takeWhileM, dropWhile, dropWhileM,
 
   -- * Searching
   elem, notElem, find, findM, findIndex, findIndexM,
@@ -59,6 +59,7 @@ module Data.Vector.Fusion.Bundle.Monadic (
   -- * Unfolding
   unfoldr, unfoldrM,
   unfoldrN, unfoldrNM,
+  unfoldrExactN, unfoldrExactNM,
   iterateN, iterateNM,
 
   -- * Scans
@@ -79,7 +80,7 @@ module Data.Vector.Fusion.Bundle.Monadic (
 import Data.Vector.Generic.Base
 import qualified Data.Vector.Generic.Mutable.Base as M
 import Data.Vector.Fusion.Bundle.Size
-import Data.Vector.Fusion.Util ( Box(..), delay_inline )
+import Data.Vector.Fusion.Util ( Box(..), delay_inline, Id(..) )
 import Data.Vector.Fusion.Stream.Monadic ( Stream(..), Step(..) )
 import qualified Data.Vector.Fusion.Stream.Monadic as S
 import Control.Monad.Primitive
@@ -123,6 +124,13 @@ data Bundle m v a = Bundle { sElems  :: Stream m a
                            , sVector :: Maybe (v a)
                            , sSize   :: Size
                            }
+
+-- | Convert a pure stream to a monadic stream
+lift :: Monad m => Bundle Id v a -> Bundle m v a
+{-# INLINE_FUSED lift #-}
+lift (Bundle (Stream step s) (Stream vstep t) v sz)
+    = Bundle (Stream (return . unId . step) s)
+             (Stream (return . unId . vstep) t) v sz
 
 fromStream :: Monad m => Stream m a -> Size -> Bundle m v a
 {-# INLINE fromStream #-}
@@ -283,6 +291,10 @@ drop n Bundle{sElems = s, sSize = sz} =
 instance Monad m => Functor (Bundle m v) where
   {-# INLINE fmap #-}
   fmap = map
+#if MIN_VERSION_base(4,8,0)
+  {-# INLINE (<$) #-}
+  (<$) = map . const
+#endif
 
 -- | Map a function over a 'Bundle'
 map :: Monad m => (a -> b) -> Bundle m v a -> Bundle m v b
@@ -334,7 +346,7 @@ zipWithM f Bundle{sElems = sa, sSize = na}
 {-# RULES
 
 "zipWithM xs xs [Vector.Bundle]" forall f xs.
-  zipWithM f xs xs = mapM (\x -> f x x) xs   #-}
+  zipWithM f (lift xs) (lift xs) = mapM (\x -> f x x) (lift xs) #-}
 
 
 zipWithM_ :: Monad m => (a -> b -> m c) -> Bundle m v a -> Bundle m v b -> m ()
@@ -453,6 +465,13 @@ filter f = filterM (return . f)
 filterM :: Monad m => (a -> m Bool) -> Bundle m v a -> Bundle m v a
 {-# INLINE_FUSED filterM #-}
 filterM f Bundle{sElems = s, sSize = n} = fromStream (S.filterM f s) (toMax n)
+
+-- | Apply monadic function to each element and drop all Nothings
+--
+-- @since 0.12.2.0
+mapMaybeM :: Monad m => (a -> m (Maybe b)) -> Bundle m v a -> Bundle m v b
+{-# INLINE_FUSED mapMaybeM #-}
+mapMaybeM f Bundle{sElems = s, sSize = n} = fromStream (S.mapMaybeM f s) (toMax n)
 
 -- | Longest prefix of elements that satisfy the predicate
 takeWhile :: Monad m => (a -> Bool) -> Bundle m v a -> Bundle m v a
@@ -640,17 +659,35 @@ unfoldrN :: Monad m => Int -> (s -> Maybe (a, s)) -> s -> Bundle m u a
 {-# INLINE_FUSED unfoldrN #-}
 unfoldrN n f = unfoldrNM n (return . f)
 
--- | Unfold at most @n@ elements with a monadic functions
+-- | Unfold at most @n@ elements with a monadic function.
 unfoldrNM :: Monad m => Int -> (s -> m (Maybe (a, s))) -> s -> Bundle m u a
 {-# INLINE_FUSED unfoldrNM #-}
 unfoldrNM n f s = fromStream (S.unfoldrNM n f s) (Max (delay_inline max n 0))
 
--- | Apply monadic function n times to value. Zeroth element is original value.
+-- | Unfold exactly @n@ elements
+--
+-- @since 0.12.2.0
+unfoldrExactN :: Monad m => Int -> (s -> (a, s)) -> s -> Bundle m u a
+{-# INLINE_FUSED unfoldrExactN #-}
+unfoldrExactN n f = unfoldrExactNM n (return . f)
+
+-- | Unfold exactly @n@ elements with a monadic function.
+--
+-- @since 0.12.2.0
+unfoldrExactNM :: Monad m => Int -> (s -> m (a, s)) -> s -> Bundle m u a
+{-# INLINE_FUSED unfoldrExactNM #-}
+unfoldrExactNM n f s = fromStream (S.unfoldrExactNM n f s) (Max (delay_inline max n 0))
+
+-- | /O(n)/ Apply monadic function \(\max(n - 1, 0)\) times to an initial value, producing
+-- a monadic bundle of exact length \(\max(n, 0)\). Zeroth element will contain the initial
+-- value.
 iterateNM :: Monad m => Int -> (a -> m a) -> a -> Bundle m u a
 {-# INLINE_FUSED iterateNM #-}
 iterateNM n f x0 = fromStream (S.iterateNM n f x0) (Exact (delay_inline max n 0))
 
--- | Apply function n times to value. Zeroth element is original value.
+-- | /O(n)/ Apply function \(\max(n - 1, 0)\) times to an initial value, producing a
+-- monadic bundle of exact length \(\max(n, 0)\). Zeroth element will contain the initial
+-- value.
 iterateN :: Monad m => Int -> (a -> a) -> a -> Bundle m u a
 {-# INLINE_FUSED iterateN #-}
 iterateN n f x0 = iterateNM n (return . f) x0

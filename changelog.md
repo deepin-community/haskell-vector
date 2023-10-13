@@ -1,3 +1,42 @@
+# Changes in version 0.12.3.1
+
+* Bugfix for ghcjs and `Double` memset for `Storable` vector:
+  [#410](https://github.com/haskell/vector/issues/410)
+* Avoid haddock bug: [#383](https://github.com/haskell/vector/issues/383)
+* Improve haddock and doctests
+* Disable problematic tests with -boundschecks [#407](https://github.com/haskell/vector/pull/407)
+
+# Changes in version 0.12.3.0
+
+ * Fix performance regression due to introduction of `keepAlive#` primop in ghc-9.0: [#372](https://github.com/haskell/vector/pull/372)
+
+ * Add monadic functions for mutable vectors: [#338](https://github.com/haskell/vector/pull/338)
+
+   * Added folds for monadic functions: `mapM_`, `imapM_`, `forM_`, `iforM_`,
+     `foldl`, `foldl'`, `foldM`, `foldM'`, `ifoldl`, `ifoldl'`, `ifoldM`,
+     `ifoldM'`
+   * Added `modifyM` and `unsafeModifyM` for mutable vectors
+   * Added `generate` and `generateM` for mutable vectors
+
+# Changes in version 0.12.2.0
+
+ * Add `MINIMAL` pragma to `Vector` & `MVector` type classes: [#11](https://github.com/haskell/vector/issues/11)
+ * Export `unstreamM` from`from Data.Vector.Generic`: [#70](https://github.com/haskell/vector/issues/70)
+ * New functions: `unfoldrExactN` and `unfoldrExactNM`: [#140](https://github.com/haskell/vector/issues/140)
+ * Added `iforM` and `iforM_`: [#262](https://github.com/haskell/vector/issues/262)
+ * Added `MonadFix` instance for boxed vectors: [#178](https://github.com/haskell/vector/issues/178)
+ * Added `uncons` and `unsnoc`: [#212](https://github.com/haskell/vector/issues/212)
+ * Added `foldMap` and `foldMap'`: [#263](https://github.com/haskell/vector/issues/263)
+ * Added `isSameVector` for storable vectors
+ * Added `toArray`, `fromArray`, `toMutableArray` and `fromMutableArray`
+ * Added `iscanl`, `iscanl'`, `iscanr`, `iscanr'` to `Primitive`, `Storable` and `Unboxed`
+ * Added `izipWithM`, `izipWithM_`, `imapM` and `imapM_` to `Primitive` and `Storable`
+ * Added `ifoldM`, `ifoldM'`, `ifoldM_` and `ifoldM'_` to `Primitive` and `Storable`
+ * Added `eqBy` and `cmpBy`
+ * Added `findIndexR` to `Generic`: [#172](https://github.com/haskell/vector/issues/172)
+ * Added `catMaybes`: [#329](https://github.com/haskell/vector/issues/329)
+ * Added `mapMaybeM` and `imapMaybeM`: [#183](https://github.com/haskell/vector/issues/183)
+
 # Changes in version 0.12.1.2
 
  * Fix for lost function `Data.Vector.Generic.mkType`: [#287](https://github.com/haskell/vector/issues/287)
