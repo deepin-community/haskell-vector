@@ -13,6 +13,7 @@ module Tests.Vector.Property
   , testMonadFunctions
   , testApplicativeFunctions
   , testAlternativeFunctions
+  , testSequenceFunctions
   , testBoolFunctions
   , testNumFunctions
   , testNestedVectorFunctions
@@ -20,18 +21,21 @@ module Tests.Vector.Property
   -- re-exports
   , Data
   , Random
-  ,Test
+  , Test
   ) where
 
 import Boilerplater
 import Utilities as Util hiding (limitUnfolds)
 
-import Data.Functor.Identity
+import Control.Monad
+import Control.Monad.ST
 import qualified Data.Traversable as T (Traversable(..))
 import Data.Foldable (Foldable(foldMap))
+import Data.Functor.Identity
 import Data.Orphans ()
-
+import Data.Foldable (foldrM)
 import qualified Data.Vector.Generic as V
+import qualified Data.Vector.Generic.Mutable as MV
 import qualified Data.Vector.Fusion.Bundle as S
 
 import Test.QuickCheck
@@ -67,36 +71,11 @@ type VectorContext  a v = ( Eq (v a), Show (v a), Arbitrary (v a), CoArbitrary (
 type Test = TestTree
 -- TODO: implement Vector equivalents of list functions for some of the commented out properties
 
--- TODO: test and implement some of these other Prelude functions:
---  mapM *
---  mapM_ *
---  sequence
---  sequence_
---  sum *
---  product *
---  scanl *
---  scanl1 *
---  scanr *
---  scanr1 *
---  lookup *
---  lines
---  words
---  unlines
---  unwords
--- NB: this is an exhaustive list of all Prelude list functions that make sense for vectors.
--- Ones with *s are the most plausible candidates.
-
 -- TODO: add tests for the other extra functions
 -- IVector exports still needing tests:
 --  copy,
---  slice,
---  (//), update, bpermute,
---  prescanl, prescanl',
 --  new,
 --  unsafeSlice, unsafeIndex,
---  vlength, vnew
-
--- TODO: test non-IVector stuff?
 
 testSanity :: forall a v. (CommonContext a v) => v a -> [Test]
 {-# INLINE testSanity #-}
@@ -121,7 +100,7 @@ testPolymorphicFunctions _ = $(testProperties [
         -- Length information
         'prop_length, 'prop_null,
 
-        -- Indexing (FIXME)
+        -- Indexing
         'prop_index, 'prop_safeIndex, 'prop_head, 'prop_last,
         'prop_unsafeIndex, 'prop_unsafeHead, 'prop_unsafeLast,
 
@@ -138,16 +117,15 @@ testPolymorphicFunctions _ = $(testProperties [
         -- Initialisation (FIXME)
         'prop_empty, 'prop_singleton, 'prop_replicate,
         'prop_generate, 'prop_iterateN, 'prop_iterateNM,
+        'prop_generateM, 'prop_replicateM,
 
         -- Monadic initialisation (FIXME)
-        'prop_createT,
-        {- 'prop_replicateM, 'prop_generateM, 'prop_create, -}
+        'prop_create, 'prop_createT,
 
         -- Unfolding
-        'prop_unfoldr, 'prop_unfoldrN, 'prop_unfoldrM, 'prop_unfoldrNM,
+        'prop_unfoldr, 'prop_unfoldrN, 'prop_unfoldrExactN,
+        'prop_unfoldrM, 'prop_unfoldrNM, 'prop_unfoldrExactNM,
         'prop_constructN, 'prop_constructrN,
-
-        -- Enumeration? (FIXME?)
 
         -- Concatenation (FIXME)
         'prop_cons, 'prop_snoc, 'prop_append,
@@ -159,7 +137,7 @@ testPolymorphicFunctions _ = $(testProperties [
 
         -- Bulk updates (FIXME)
         'prop_upd,
-        {- 'prop_update, 'prop_update_,
+        {- 'prop_update_,
         'prop_unsafeUpd, 'prop_unsafeUpdate, 'prop_unsafeUpdate_, -}
 
         -- Accumulations (FIXME)
@@ -171,30 +149,23 @@ testPolymorphicFunctions _ = $(testProperties [
         'prop_reverse, 'prop_backpermute,
         {- 'prop_unsafeBackpermute, -}
 
-        -- Elementwise indexing
-        {- 'prop_indexed, -}
-
         -- Mapping
         'prop_map, 'prop_imap, 'prop_concatMap,
 
         -- Monadic mapping
-        {- 'prop_mapM, 'prop_mapM_, 'prop_forM, 'prop_forM_, -}
+        'prop_mapM, 'prop_mapM_, 'prop_forM, 'prop_forM_,
         'prop_imapM, 'prop_imapM_,
 
         -- Zipping
-        'prop_zipWith, 'prop_zipWith3, {- ... -}
-        'prop_izipWith, 'prop_izipWith3, {- ... -}
+        'prop_zipWith, 'prop_zipWith3,
+        'prop_izipWith, 'prop_izipWith3,
         'prop_izipWithM, 'prop_izipWithM_,
-        {- 'prop_zip, ... -}
 
         -- Monadic zipping
-        {- 'prop_zipWithM, 'prop_zipWithM_, -}
-
-        -- Unzipping
-        {- 'prop_unzip, ... -}
+        'prop_zipWithM, 'prop_zipWithM_,
 
         -- Filtering
-        'prop_filter, 'prop_ifilter, {- prop_filterM, -}
+        'prop_filter, 'prop_ifilter, 'prop_filterM,
         'prop_uniq,
         'prop_mapMaybe, 'prop_imapMaybe,
         'prop_takeWhile, 'prop_dropWhile,
@@ -206,7 +177,7 @@ testPolymorphicFunctions _ = $(testProperties [
 
         -- Searching
         'prop_elem, 'prop_notElem,
-        'prop_find, 'prop_findIndex, 'prop_findIndices,
+        'prop_find, 'prop_findIndex, 'prop_findIndexR, 'prop_findIndices,
         'prop_elemIndex, 'prop_elemIndices,
 
         -- Folding
@@ -217,14 +188,6 @@ testPolymorphicFunctions _ = $(testProperties [
 
         -- Specialised folds
         'prop_all, 'prop_any,
-        {- 'prop_maximumBy, 'prop_minimumBy,
-        'prop_maxIndexBy, 'prop_minIndexBy, -}
-
-        -- Monadic folds
-        {- ... -}
-
-        -- Monadic sequencing
-        {- ... -}
 
         -- Scans
         'prop_prescanl, 'prop_prescanl',
@@ -235,7 +198,17 @@ testPolymorphicFunctions _ = $(testProperties [
         'prop_prescanr, 'prop_prescanr',
         'prop_postscanr, 'prop_postscanr',
         'prop_scanr, 'prop_scanr', 'prop_scanr1, 'prop_scanr1',
-        'prop_iscanr, 'prop_iscanr'
+        'prop_iscanr, 'prop_iscanr',
+
+        -- Mutable API
+        'prop_mut_read, 'prop_mut_write, 'prop_mut_modify,
+
+        'prop_mut_generate, 'prop_mut_generateM,
+        'prop_mut_mapM_, 'prop_mut_imapM_, 'prop_mut_forM_, 'prop_mut_iforM_,
+        'prop_mut_foldr, 'prop_mut_foldr', 'prop_mut_foldl, 'prop_mut_foldl',
+        'prop_mut_ifoldr, 'prop_mut_ifoldr', 'prop_mut_ifoldl, 'prop_mut_ifoldl',
+        'prop_mut_foldM, 'prop_mut_foldM', 'prop_mut_foldrM, 'prop_mut_foldrM',
+        'prop_mut_ifoldM, 'prop_mut_ifoldM', 'prop_mut_ifoldrM, 'prop_mut_ifoldrM'
     ])
   where
     -- Prelude
@@ -245,9 +218,11 @@ testPolymorphicFunctions _ = $(testProperties [
     prop_null   :: P (v a -> Bool)    = V.null `eq` null
 
     prop_empty  :: P (v a)            = V.empty `eq` []
-    prop_singleton :: P (a -> v a)    = V.singleton `eq` singleton
+    prop_singleton :: P (a -> v a)    = V.singleton `eq` Util.singleton
     prop_replicate :: P (Int -> a -> v a)
               = (\n _ -> n < 1000) ===> V.replicate `eq` replicate
+    prop_replicateM :: P (Int -> Writer [a] a -> Writer [a] (v a))
+              = (\n _ -> n < 1000) ===> V.replicateM `eq` replicateM
     prop_cons      :: P (a -> v a -> v a) = V.cons `eq` (:)
     prop_snoc      :: P (v a -> a -> v a) = V.snoc `eq` snoc
     prop_append    :: P (v a -> v a -> v a) = (V.++) `eq` (++)
@@ -255,10 +230,14 @@ testPolymorphicFunctions _ = $(testProperties [
     prop_force     :: P (v a -> v a)        = V.force `eq` id
     prop_generate  :: P (Int -> (Int -> a) -> v a)
               = (\n _ -> n < 1000) ===> V.generate `eq` Util.generate
+    prop_generateM  :: P (Int -> (Int -> Writer [a] a) -> Writer [a] (v a))
+              = (\n _ -> n < 1000) ===> V.generateM `eq` Util.generateM
     prop_iterateN  :: P (Int -> (a -> a) -> a -> v a)
               = (\n _ _ -> n < 1000) ===> V.iterateN `eq` (\n f -> take n . iterate f)
     prop_iterateNM :: P (Int -> (a -> Writer [Int] a) -> a -> Writer [Int] (v a))
               = (\n _ _ -> n < 1000) ===> V.iterateNM `eq` Util.iterateNM
+    prop_create :: P (v a -> v a)
+    prop_create = (\v -> V.create (V.thaw v)) `eq` id
     prop_createT :: P ((a, v a) -> (a, v a))
     prop_createT = (\v -> V.createT (T.mapM V.thaw v)) `eq` id
 
@@ -319,6 +298,14 @@ testPolymorphicFunctions _ = $(testProperties [
     prop_reverse :: P (v a -> v a) = V.reverse `eq` reverse
 
     prop_map :: P ((a -> a) -> v a -> v a) = V.map `eq` map
+    prop_mapM :: P ((a -> Identity a) -> v a -> Identity (v a))
+            = V.mapM `eq` mapM
+    prop_mapM_ :: P ((a -> Writer [a] ()) -> v a -> Writer [a] ())
+            = V.mapM_ `eq` mapM_
+    prop_forM :: P (v a -> (a -> Identity a) -> Identity (v a))
+            = V.forM `eq` forM
+    prop_forM_ :: P (v a -> (a -> Writer [a] ()) -> Writer [a] ())
+            = V.forM_ `eq` forM_
     prop_zipWith :: P ((a -> a -> a) -> v a -> v a -> v a) = V.zipWith `eq` zipWith
     prop_zipWith3 :: P ((a -> a -> a -> a) -> v a -> v a -> v a -> v a)
              = V.zipWith3 `eq` zipWith3
@@ -328,6 +315,10 @@ testPolymorphicFunctions _ = $(testProperties [
     prop_imapM_ :: P ((Int -> a -> Writer [a] ()) -> v a -> Writer [a] ())
             = V.imapM_ `eq` imapM_
     prop_izipWith :: P ((Int -> a -> a -> a) -> v a -> v a -> v a) = V.izipWith `eq` izipWith
+    prop_zipWithM :: P ((a -> a -> Identity a) -> v a -> v a -> Identity (v a))
+            = V.zipWithM `eq` zipWithM
+    prop_zipWithM_ :: P ((a -> a -> Writer [a] ()) -> v a -> v a -> Writer [a] ())
+            = V.zipWithM_ `eq` zipWithM_
     prop_izipWithM :: P ((Int -> a -> a -> Identity a) -> v a -> v a -> Identity (v a))
             = V.izipWithM `eq` izipWithM
     prop_izipWithM_ :: P ((Int -> a -> a -> Writer [a] ()) -> v a -> v a -> Writer [a] ())
@@ -337,6 +328,7 @@ testPolymorphicFunctions _ = $(testProperties [
 
     prop_filter :: P ((a -> Bool) -> v a -> v a) = V.filter `eq` filter
     prop_ifilter :: P ((Int -> a -> Bool) -> v a -> v a) = V.ifilter `eq` ifilter
+    prop_filterM :: P ((a -> Writer [a] Bool) -> v a -> Writer [a] (v a)) = V.filterM `eq` filterM
     prop_mapMaybe :: P ((a -> Maybe a) -> v a -> v a) = V.mapMaybe `eq` mapMaybe
     prop_imapMaybe :: P ((Int -> a -> Maybe a) -> v a -> v a) = V.imapMaybe `eq` imapMaybe
     prop_takeWhile :: P ((a -> Bool) -> v a -> v a) = V.takeWhile `eq` takeWhile
@@ -353,6 +345,10 @@ testPolymorphicFunctions _ = $(testProperties [
     prop_find    :: P ((a -> Bool) -> v a -> Maybe a) = V.find `eq` find
     prop_findIndex :: P ((a -> Bool) -> v a -> Maybe Int)
       = V.findIndex `eq` findIndex
+    prop_findIndexR :: P ((a -> Bool) -> v a -> Maybe Int)
+      = V.findIndexR `eq` \p l -> case filter (p . snd) . reverse $ zip [0..] l of
+                                     (i,_):_ -> Just i
+                                     []      -> Nothing
     prop_findIndices :: P ((a -> Bool) -> v a -> v Int)
         = V.findIndices `eq` findIndices
     prop_elemIndex :: P (a -> v a -> Maybe Int) = V.elemIndex `eq` elemIndex
@@ -439,18 +435,8 @@ testPolymorphicFunctions _ = $(testProperties [
 
     prop_uniq :: P (v a -> v a)
       = V.uniq `eq` (map head . group)
-    --prop_span         = (V.span :: (a -> Bool) -> v a -> (v a, v a))  `eq2` span
-    --prop_break        = (V.break :: (a -> Bool) -> v a -> (v a, v a)) `eq2` break
-    --prop_splitAt      = (V.splitAt :: Int -> v a -> (v a, v a))       `eq2` splitAt
-    --prop_all          = (V.all :: (a -> Bool) -> v a -> Bool)         `eq2` all
-    --prop_any          = (V.any :: (a -> Bool) -> v a -> Bool)         `eq2` any
 
     -- Data.List
-    --prop_findIndices  = V.findIndices `eq2` (findIndices :: (a -> Bool) -> v a -> v Int)
-    --prop_isPrefixOf   = V.isPrefixOf  `eq2` (isPrefixOf  :: v a -> v a -> Bool)
-    --prop_elemIndex    = V.elemIndex   `eq2` (elemIndex   :: a -> v a -> Maybe Int)
-    --prop_elemIndices  = V.elemIndices `eq2` (elemIndices :: a -> v a -> v Int)
-    --
     --prop_mapAccumL  = eq3
     --    (V.mapAccumL :: (X -> W -> (X,W)) -> X -> B   -> (X, B))
     --    (  mapAccumL :: (X -> W -> (X,W)) -> X -> [W] -> (X, [W]))
@@ -476,11 +462,15 @@ testPolymorphicFunctions _ = $(testProperties [
            `eq` (\n f a -> unfoldr (limitUnfolds f) (a, n))
     prop_unfoldrN :: P (Int -> (Int -> Maybe (a,Int)) -> Int -> v a)
          = V.unfoldrN `eq` (\n f a -> unfoldr (limitUnfolds f) (a, n))
+    prop_unfoldrExactN :: P (Int -> (Int -> (a,Int)) -> Int -> v a)
+         = V.unfoldrExactN `eq` (\n f a -> unfoldr (limitUnfolds (Just . f)) (a, n))
     prop_unfoldrM :: P (Int -> (Int -> Writer [Int] (Maybe (a,Int))) -> Int -> Writer [Int] (v a))
          = (\n f a -> V.unfoldrM (limitUnfoldsM f) (a,n))
            `eq` (\n f a -> Util.unfoldrM (limitUnfoldsM f) (a, n))
     prop_unfoldrNM :: P (Int -> (Int -> Writer [Int] (Maybe (a,Int))) -> Int -> Writer [Int] (v a))
          = V.unfoldrNM `eq` (\n f a -> Util.unfoldrM (limitUnfoldsM f) (a, n))
+    prop_unfoldrExactNM :: P (Int -> (Int -> Writer [Int] (a,Int)) -> Int -> Writer [Int] (v a))
+         = V.unfoldrExactNM `eq` (\n f a -> Util.unfoldrM (limitUnfoldsM (liftM Just . f)) (a, n))
 
     prop_constructN  = \f -> forAll (choose (0,20)) $ \n -> unP prop n f
       where
@@ -496,6 +486,110 @@ testPolymorphicFunctions _ = $(testProperties [
         constructrN xs 0 _ = xs
         constructrN xs n f = constructrN (f xs : xs) (n-1) f
 
+    prop_mut_foldr :: P ((a -> a -> a) -> a -> v a -> a) =
+      (\f z v -> runST $ MV.foldr f z =<< V.thaw v) `eq` foldr
+    prop_mut_foldr' :: P ((a -> a -> a) -> a -> v a -> a) =
+      (\f z v -> runST $ MV.foldr' f z =<< V.thaw v) `eq` foldr
+    prop_mut_foldl :: P ((a -> a -> a) -> a -> v a -> a) =
+      (\f z v -> runST $ MV.foldl f z =<< V.thaw v) `eq` foldl
+    prop_mut_foldl' :: P ((a -> a -> a) -> a -> v a -> a) =
+      (\f z v -> runST $ MV.foldl' f z =<< V.thaw v) `eq` foldl'
+    prop_mut_ifoldr :: P ((Int -> a -> a -> a) -> a -> v a -> a) =
+      (\f z v -> runST $ MV.ifoldr f z =<< V.thaw v) `eq` ifoldr
+    prop_mut_ifoldr' :: P ((Int -> a -> a -> a) -> a -> v a -> a) =
+      (\f z v -> runST $ MV.ifoldr' f z =<< V.thaw v) `eq` ifoldr
+    prop_mut_ifoldl :: P ((a -> Int -> a -> a) -> a -> v a -> a) =
+      (\f z v -> runST $ MV.ifoldl f z =<< V.thaw v) `eq` ifoldl
+    prop_mut_ifoldl' :: P ((a -> Int -> a -> a) -> a -> v a -> a) =
+      (\f z v -> runST $ MV.ifoldl' f z =<< V.thaw v) `eq` ifoldl
+
+    prop_mut_foldM :: P ((a -> a -> Identity a) -> a -> v a -> Identity a)
+      = (\f z v -> Identity $ runST $ MV.foldM (\b -> pure . runIdentity . f b) z =<< V.thaw v)
+      `eq` foldM
+    prop_mut_foldM' :: P ((a -> a -> Identity a) -> a -> v a -> Identity a)
+      = (\f z v -> Identity $ runST $ MV.foldM' (\b -> pure . runIdentity . f b) z =<< V.thaw v)
+      `eq` foldM
+    prop_mut_foldrM :: P ((a -> a -> Identity a) -> a -> v a -> Identity a)
+      = (\f z v -> Identity $ runST $ MV.foldrM (\a -> pure . runIdentity . f a) z =<< V.thaw v)
+      `eq`
+      foldrM
+    prop_mut_foldrM' :: P ((a -> a -> Identity a) -> a -> v a -> Identity a)
+      = (\f z v -> Identity $ runST $ MV.foldrM' (\a b -> pure $ runIdentity $ f a b) z =<< V.thaw v)
+      `eq`
+      foldrM
+
+    prop_mut_read = \xs ->
+      not (V.null xs) ==>
+      forAll (choose (0, V.length xs-1)) $ \i ->
+      unP prop xs i
+      where
+        prop :: P (v a -> Int -> a) = (\v i -> runST $ do mv <- V.thaw v
+                                                          MV.read mv i
+                                      ) `eq` (!!)
+    prop_mut_write = \xs ->
+      not (V.null xs) ==>
+      forAll (choose (0, V.length xs-1)) $ \i ->
+      unP prop xs i
+      where
+        prop :: P (v a -> Int -> a -> v a) = (\v i a -> runST $ do mv <- V.thaw v
+                                                                   MV.write mv i a
+                                                                   V.freeze mv
+                                             ) `eq` writeList
+    prop_mut_modify = \xs f ->
+      not (V.null xs) ==>
+      forAll (choose (0, V.length xs-1)) $ \i ->
+      unP prop xs f i
+      where
+        prop :: P (v a -> (a -> a) -> Int -> v a)
+          = (\v f i -> runST $ do mv <- V.thaw v
+                                  MV.modify mv f i
+                                  V.freeze mv
+            ) `eq` modifyList
+
+
+
+    prop_mut_generate :: P (Int -> (Int -> a) -> v a)
+      = (\n _ -> n < 1000) ===> (\n f -> runST $ V.freeze =<< MV.generate n f)
+      `eq` Util.generate
+    prop_mut_generateM :: P (Int -> (Int -> Writer [a] a) -> Writer [a] (v a))
+      = (\n _ -> n < 1000) ===> (\n f -> liftRunST $ V.freeze =<< MV.generateM n (hoistST . f))
+      `eq` Util.generateM
+
+    prop_mut_ifoldM :: P ((a -> Int -> a -> Identity a) -> a -> v a -> Identity a)
+      = (\f z v -> Identity $ runST $ MV.ifoldM (\b i -> pure . runIdentity . f b i) z =<< V.thaw v)
+      `eq` ifoldM
+    prop_mut_ifoldM' :: P ((a -> Int -> a -> Identity a) -> a -> v a -> Identity a)
+      = (\f z v -> Identity $ runST $ MV.ifoldM' (\b i -> pure . runIdentity . f b i) z =<< V.thaw v)
+      `eq` ifoldM
+    prop_mut_ifoldrM :: P ((Int -> a -> a -> Identity a) -> a -> v a -> Identity a)
+      = (\f z v -> Identity $ runST $ MV.ifoldrM (\i b -> pure . runIdentity . f i b) z =<< V.thaw v)
+      `eq`
+      ifoldrM
+    prop_mut_ifoldrM' :: P ((Int -> a -> a -> Identity a) -> a -> v a -> Identity a)
+      = (\f z v -> Identity $ runST $ MV.ifoldrM' (\i b -> pure . runIdentity . f i b) z =<< V.thaw v)
+      `eq`
+      ifoldrM
+
+    prop_mut_forM_ :: P (v a -> (a -> Writer [a] ()) -> Writer [a] ())
+      = (\v f -> liftRunST $ do mv <- V.thaw v
+                                MV.forM_ mv (hoistST . f))
+      `eq` flip mapM_
+    prop_mut_iforM_ :: P (v a -> (Int -> a -> Writer [a] ()) -> Writer [a] ())
+      = (\v f -> liftRunST $ do mv <- V.thaw v
+                                MV.iforM_ mv (\i x -> hoistST $ f i x))
+      `eq` flip imapM_
+    prop_mut_mapM_ :: P ((a -> Writer [a] ()) -> v a -> Writer [a] ())
+      = (\f v -> liftRunST $ MV.mapM_ (hoistST . f) =<< V.thaw v) `eq` mapM_
+    prop_mut_imapM_ :: P ((Int -> a -> Writer [a] ()) -> v a -> Writer [a] ())
+      = (\f v -> liftRunST $ MV.imapM_ (\i x -> hoistST $ f i x) =<< V.thaw v) `eq` imapM_
+
+
+liftRunST :: (forall s. WriterT w (ST s) a) -> Writer w a
+liftRunST m = WriterT $ Identity $ runST $ runWriterT m
+
+hoistST :: Writer w a -> WriterT w (ST s) a
+hoistST = WriterT . pure . runWriter
+
 -- copied from GHC source code
 partitionWith :: (a -> Either b c) -> [a] -> ([b], [c])
 partitionWith _ [] = ([],[])
@@ -504,16 +598,30 @@ partitionWith f (x:xs) = case f x of
                          Right c -> (bs, c:cs)
     where (bs,cs) = partitionWith f xs
 
-testTuplyFunctions :: forall a v. (CommonContext a v, VectorContext (a, a) v, VectorContext (a, a, a) v) => v a -> [Test]
+testTuplyFunctions
+  :: forall a v. ( CommonContext a v
+                 , VectorContext (a, a)    v
+                 , VectorContext (a, a, a) v
+                 , VectorContext (Int, a)  v
+                 )
+  => v a -> [Test]
 {-# INLINE testTuplyFunctions #-}
 testTuplyFunctions _ = $(testProperties [ 'prop_zip, 'prop_zip3
                                         , 'prop_unzip, 'prop_unzip3
+                                        , 'prop_indexed
+                                        , 'prop_update
                                         ])
   where
-    prop_zip    :: P (v a -> v a -> v (a, a))           = V.zip `eq` zip
-    prop_zip3   :: P (v a -> v a -> v a -> v (a, a, a)) = V.zip3 `eq` zip3
-    prop_unzip  :: P (v (a, a) -> (v a, v a))           = V.unzip `eq` unzip
-    prop_unzip3 :: P (v (a, a, a) -> (v a, v a, v a))   = V.unzip3 `eq` unzip3
+    prop_zip     :: P (v a -> v a -> v (a, a))           = V.zip `eq` zip
+    prop_zip3    :: P (v a -> v a -> v a -> v (a, a, a)) = V.zip3 `eq` zip3
+    prop_unzip   :: P (v (a, a) -> (v a, v a))           = V.unzip `eq` unzip
+    prop_unzip3  :: P (v (a, a, a) -> (v a, v a, v a))   = V.unzip3 `eq` unzip3
+    prop_indexed :: P (v a -> v (Int, a))                = V.indexed `eq` (\xs -> [0..] `zip` xs)
+    prop_update = \xs ->
+      forAll (index_value_pairs (V.length xs)) $ \ps ->
+      unP prop xs ps
+      where
+        prop :: P (v a -> [(Int,a)] -> v a) = (V.//) `eq` (//)
 
 testOrdFunctions :: forall a v. (CommonContext a v, Ord a, Ord (v a)) => v a -> [Test]
 {-# INLINE testOrdFunctions #-}
@@ -617,12 +725,30 @@ testFunctorFunctions _ = $(testProperties
 testMonadFunctions :: forall a v. (CommonContext a v, VectorContext (a, a) v, MonadZip v) => v a -> [Test]
 {-# INLINE testMonadFunctions #-}
 testMonadFunctions _ = $(testProperties [ 'prop_return, 'prop_bind
-                                        , 'prop_mzip, 'prop_munzip])
+                                        , 'prop_mzip, 'prop_munzip
+                                        ])
   where
     prop_return :: P (a -> v a) = return `eq` return
     prop_bind   :: P (v a -> (a -> v a) -> v a) = (>>=) `eq` (>>=)
     prop_mzip   :: P (v a -> v a -> v (a, a)) = mzip `eq` zip
     prop_munzip :: P (v (a, a) -> (v a, v a)) = munzip `eq` unzip
+
+testSequenceFunctions
+  :: forall a v. ( CommonContext a v
+                 , Model (v (Writer [a] a)) ~ [Writer [a] a]
+                 , V.Vector v (Writer [a] a)
+                 , Arbitrary (v (Writer [a] a))
+                 , Show      (v (Writer [a] a))
+                 , TestData  (v (Writer [a] a))
+                 )
+  => v a -> [Test]
+testSequenceFunctions _ = $(testProperties [ 'prop_sequence, 'prop_sequence_
+                                           ])
+  where
+    prop_sequence :: P (v (Writer [a] a) -> Writer [a] (v a))
+      = V.sequence `eq` sequence
+    prop_sequence_ :: P (v (Writer [a] a) -> Writer [a] ())
+      = V.sequence_ `eq` sequence_
 
 testApplicativeFunctions :: forall a v. (CommonContext a v, V.Vector v (a -> a), Applicative.Applicative v) => v a -> [Test]
 {-# INLINE testApplicativeFunctions #-}
@@ -659,16 +785,11 @@ testNumFunctions _ = $(testProperties ['prop_sum, 'prop_product])
 
 testNestedVectorFunctions :: forall a v. (CommonContext a v) => v a -> [Test]
 {-# INLINE testNestedVectorFunctions #-}
-testNestedVectorFunctions _ = $(testProperties [])
+testNestedVectorFunctions _ = $(testProperties
+  [ 'prop_concat
+  ])
   where
-    -- Prelude
-    --prop_concat       = (V.concat :: [v a] -> v a)                    `eq1` concat
-
-    -- Data.List
-    --prop_transpose    = V.transpose   `eq1` (transpose   :: [v a] -> [v a])
-    --prop_group        = V.group       `eq1` (group       :: v a -> [v a])
-    --prop_inits        = V.inits       `eq1` (inits       :: v a -> [v a])
-    --prop_tails        = V.tails       `eq1` (tails       :: v a -> [v a])
+    prop_concat :: P ([v a] -> v a) = V.concat `eq` concat
 
 testDataFunctions :: forall a v. (CommonContext a v, Data a, Data (v a)) => v a -> [Test]
 {-# INLINE testDataFunctions #-}

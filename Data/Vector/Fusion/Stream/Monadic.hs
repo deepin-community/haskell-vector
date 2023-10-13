@@ -40,7 +40,7 @@ module Data.Vector.Fusion.Stream.Monadic (
   eqBy, cmpBy,
 
   -- * Filtering
-  filter, filterM, uniq, mapMaybe, takeWhile, takeWhileM, dropWhile, dropWhileM,
+  filter, filterM, uniq, mapMaybe, mapMaybeM, catMaybes, takeWhile, takeWhileM, dropWhile, dropWhileM,
 
   -- * Searching
   elem, notElem, find, findM, findIndex, findIndexM,
@@ -56,6 +56,7 @@ module Data.Vector.Fusion.Stream.Monadic (
   -- * Unfolding
   unfoldr, unfoldrM,
   unfoldrN, unfoldrNM,
+  unfoldrExactN, unfoldrExactNM,
   iterateN, iterateNM,
 
   -- * Scans
@@ -133,6 +134,10 @@ instance Functor (Step s) where
   fmap f (Yield x s) = Yield (f x) s
   fmap _ (Skip s) = Skip s
   fmap _ Done = Done
+#if MIN_VERSION_base(4,8,0)
+  {-# INLINE (<$) #-}
+  (<$) = fmap . const
+#endif
 
 -- | Monadic streams
 data Stream m a = forall s. Stream (s -> m (Step s a)) s
@@ -510,13 +515,6 @@ zipWithM f (Stream stepa ta) (Stream stepb tb) = Stream step (ta, tb, Nothing)
                                  Skip    sb' -> return $ Skip (sa, sb', Just x)
                                  Done        -> return $ Done
 
--- FIXME: This might expose an opportunity for inplace execution.
-{-# RULES
-
-"zipWithM xs xs [Vector.Stream]" forall f xs.
-  zipWithM f xs xs = mapM (\x -> f x x) xs   #-}
-
-
 zipWithM_ :: Monad m => (a -> b -> m c) -> Stream m a -> Stream m b -> m ()
 {-# INLINE zipWithM_ #-}
 zipWithM_ f sa sb = consume (zipWithM f sa sb)
@@ -703,6 +701,9 @@ mapMaybe f (Stream step t) = Stream step' t
                   Skip    s' -> return $ Skip s'
                   Done       -> return $ Done
 
+catMaybes :: Monad m => Stream m (Maybe a) -> Stream m a
+catMaybes = mapMaybe id
+
 -- | Drop elements which do not satisfy the monadic predicate
 filterM :: Monad m => (a -> m Bool) -> Stream m a -> Stream m a
 {-# INLINE_FUSED filterM #-}
@@ -716,6 +717,25 @@ filterM f (Stream step t) = Stream step' t
                                   b <- f x
                                   return $ if b then Yield x s'
                                                 else Skip    s'
+                  Skip    s' -> return $ Skip s'
+                  Done       -> return $ Done
+
+-- | Apply monadic function to each element and drop all Nothings
+--
+-- @since 0.12.2.0
+mapMaybeM :: Monad m => (a -> m (Maybe b)) -> Stream m a -> Stream m b
+{-# INLINE_FUSED mapMaybeM #-}
+mapMaybeM f (Stream step t) = Stream step' t
+  where
+    {-# INLINE_INNER step' #-}
+    step' s = do
+                r <- step s
+                case r of
+                  Yield x s' -> do
+                                  fx <- f x
+                                  return $ case fx of
+                                    Nothing -> Skip s'
+                                    Just b  -> Yield b s'
                   Skip    s' -> return $ Skip s'
                   Done       -> return $ Done
 
@@ -1104,7 +1124,7 @@ unfoldrN :: Monad m => Int -> (s -> Maybe (a, s)) -> s -> Stream m a
 {-# INLINE_FUSED unfoldrN #-}
 unfoldrN n f = unfoldrNM n (return . f)
 
--- | Unfold at most @n@ elements with a monadic functions
+-- | Unfold at most @n@ elements with a monadic function.
 unfoldrNM :: Monad m => Int -> (s -> m (Maybe (a, s))) -> s -> Stream m a
 {-# INLINE_FUSED unfoldrNM #-}
 unfoldrNM m f t = Stream step (t,m)
@@ -1117,7 +1137,27 @@ unfoldrNM m f t = Stream step (t,m)
                                  Nothing     -> Done
                              ) (f s)
 
--- | Apply monadic function n times to value. Zeroth element is original value.
+-- | Unfold exactly @n@ elements
+--
+-- @since 0.12.2.0
+unfoldrExactN :: Monad m => Int -> (s -> (a, s)) -> s -> Stream m a
+{-# INLINE_FUSED unfoldrExactN #-}
+unfoldrExactN n f = unfoldrExactNM n (return . f)
+
+-- | Unfold exactly @n@ elements with a monadic function.
+--
+-- @since 0.12.2.0
+unfoldrExactNM :: Monad m => Int -> (s -> m (a, s)) -> s -> Stream m a
+{-# INLINE_FUSED unfoldrExactNM #-}
+unfoldrExactNM m f t = Stream step (t,m)
+  where
+    {-# INLINE_INNER step #-}
+    step (s,n) | n <= 0    = return Done
+               | otherwise = do (x,s') <- f s
+                                return $ Yield x (s',n-1)
+
+-- | /O(n)/ Apply monadic function \(\max(n - 1, 0)\) times to an initial value,
+-- producing a stream of \(\max(n, 0)\) values.
 iterateNM :: Monad m => Int -> (a -> m a) -> a -> Stream m a
 {-# INLINE_FUSED iterateNM #-}
 iterateNM n f x0 = Stream step (x0,n)
@@ -1128,7 +1168,8 @@ iterateNM n f x0 = Stream step (x0,n)
                | otherwise = do a <- f x
                                 return $ Yield a (a,i-1)
 
--- | Apply function n times to value. Zeroth element is original value.
+-- | /O(n)/ Apply function \(\max(n - 1, 0)\) times to an initial value,
+-- producing a stream of \(\max(n, 0)\) values.
 iterateN :: Monad m => Int -> (a -> a) -> a -> Stream m a
 {-# INLINE_FUSED iterateN #-}
 iterateN n f x0 = iterateNM n (return . f) x0

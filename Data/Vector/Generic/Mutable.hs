@@ -30,7 +30,7 @@ module Data.Vector.Generic.Mutable (
   -- * Construction
 
   -- ** Initialisation
-  new, unsafeNew, replicate, replicateM, clone,
+  new, unsafeNew, replicate, replicateM, generate, generateM, clone,
 
   -- ** Growing
   grow, unsafeGrow,
@@ -40,8 +40,15 @@ module Data.Vector.Generic.Mutable (
   clear,
 
   -- * Accessing individual elements
-  read, write, modify, swap, exchange,
-  unsafeRead, unsafeWrite, unsafeModify, unsafeSwap, unsafeExchange,
+  read, write, modify, modifyM, swap, exchange,
+  unsafeRead, unsafeWrite, unsafeModify, unsafeModifyM, unsafeSwap, unsafeExchange,
+
+  -- * Folds
+  mapM_, imapM_, forM_, iforM_,
+  foldl, foldl', foldM, foldM',
+  foldr, foldr', foldrM, foldrM',
+  ifoldl, ifoldl', ifoldM, ifoldM',
+  ifoldr, ifoldr', ifoldrM, ifoldrM',
 
   -- * Modifying vectors
   nextPermutation,
@@ -71,141 +78,13 @@ import qualified Data.Vector.Fusion.Stream.Monadic as Stream
 import           Data.Vector.Fusion.Bundle.Size
 import           Data.Vector.Fusion.Util        ( delay_inline )
 
-import Control.Monad.Primitive ( PrimMonad, PrimState )
+import Control.Monad.Primitive ( PrimMonad, PrimState, stToPrim )
 
 import Prelude hiding ( length, null, replicate, reverse, map, read,
-                        take, drop, splitAt, init, tail )
+                        take, drop, splitAt, init, tail, mapM_, foldr, foldl )
 
 #include "vector.h"
 
-{-
-type family Immutable (v :: * -> * -> *) :: * -> *
-
--- | Class of mutable vectors parametrised with a primitive state token.
---
-class MBundle.Pointer u a => MVector v a where
-  -- | Length of the mutable vector. This method should not be
-  -- called directly, use 'length' instead.
-  basicLength       :: v s a -> Int
-
-  -- | Yield a part of the mutable vector without copying it. This method
-  -- should not be called directly, use 'unsafeSlice' instead.
-  basicUnsafeSlice :: Int  -- ^ starting index
-                   -> Int  -- ^ length of the slice
-                   -> v s a
-                   -> v s a
-
-  -- Check whether two vectors overlap. This method should not be
-  -- called directly, use 'overlaps' instead.
-  basicOverlaps    :: v s a -> v s a -> Bool
-
-  -- | Create a mutable vector of the given length. This method should not be
-  -- called directly, use 'unsafeNew' instead.
-  basicUnsafeNew   :: PrimMonad m => Int -> m (v (PrimState m) a)
-
-  -- | Create a mutable vector of the given length and fill it with an
-  -- initial value. This method should not be called directly, use
-  -- 'replicate' instead.
-  basicUnsafeReplicate :: PrimMonad m => Int -> a -> m (v (PrimState m) a)
-
-  -- | Yield the element at the given position. This method should not be
-  -- called directly, use 'unsafeRead' instead.
-  basicUnsafeRead  :: PrimMonad m => v (PrimState m) a -> Int -> m a
-
-  -- | Replace the element at the given position. This method should not be
-  -- called directly, use 'unsafeWrite' instead.
-  basicUnsafeWrite :: PrimMonad m => v (PrimState m) a -> Int -> a -> m ()
-
-  -- | Reset all elements of the vector to some undefined value, clearing all
-  -- references to external objects. This is usually a noop for unboxed
-  -- vectors. This method should not be called directly, use 'clear' instead.
-  basicClear       :: PrimMonad m => v (PrimState m) a -> m ()
-
-  -- | Set all elements of the vector to the given value. This method should
-  -- not be called directly, use 'set' instead.
-  basicSet         :: PrimMonad m => v (PrimState m) a -> a -> m ()
-
-  basicUnsafeCopyPointer :: PrimMonad m => v (PrimState m) a
-                                        -> Immutable v a
-                                        -> m ()
-
-  -- | Copy a vector. The two vectors may not overlap. This method should not
-  -- be called directly, use 'unsafeCopy' instead.
-  basicUnsafeCopy  :: PrimMonad m => v (PrimState m) a   -- ^ target
-                                  -> v (PrimState m) a   -- ^ source
-                                  -> m ()
-
-  -- | Move the contents of a vector. The two vectors may overlap. This method
-  -- should not be called directly, use 'unsafeMove' instead.
-  basicUnsafeMove  :: PrimMonad m => v (PrimState m) a   -- ^ target
-                                  -> v (PrimState m) a   -- ^ source
-                                  -> m ()
-
-  -- | Grow a vector by the given number of elements. This method should not be
-  -- called directly, use 'unsafeGrow' instead.
-  basicUnsafeGrow  :: PrimMonad m => v (PrimState m) a -> Int
-                                                       -> m (v (PrimState m) a)
-
-  {-# INLINE basicUnsafeReplicate #-}
-  basicUnsafeReplicate n x
-    = do
-        v <- basicUnsafeNew n
-        basicSet v x
-        return v
-
-  {-# INLINE basicClear #-}
-  basicClear _ = return ()
-
-  {-# INLINE basicSet #-}
-  basicSet !v x
-    | n == 0    = return ()
-    | otherwise = do
-                    basicUnsafeWrite v 0 x
-                    do_set 1
-    where
-      !n = basicLength v
-
-      do_set i | 2*i < n = do basicUnsafeCopy (basicUnsafeSlice i i v)
-                                              (basicUnsafeSlice 0 i v)
-                              do_set (2*i)
-               | otherwise = basicUnsafeCopy (basicUnsafeSlice i (n-i) v)
-                                             (basicUnsafeSlice 0 (n-i) v)
-
-  {-# INLINE basicUnsafeCopyPointer #-}
-  basicUnsafeCopyPointer !dst !src = do_copy 0 src
-    where
-      do_copy !i p | Just (x,q) <- MBundle.pget p = do
-                                                      basicUnsafeWrite dst i x
-                                                      do_copy (i+1) q
-                   | otherwise = return ()
-
-  {-# INLINE basicUnsafeCopy #-}
-  basicUnsafeCopy !dst !src = do_copy 0
-    where
-      !n = basicLength src
-
-      do_copy i | i < n = do
-                            x <- basicUnsafeRead src i
-                            basicUnsafeWrite dst i x
-                            do_copy (i+1)
-                | otherwise = return ()
-
-  {-# INLINE basicUnsafeMove #-}
-  basicUnsafeMove !dst !src
-    | basicOverlaps dst src = do
-        srcCopy <- clone src
-        basicUnsafeCopy dst srcCopy
-    | otherwise = basicUnsafeCopy dst src
-
-  {-# INLINE basicUnsafeGrow #-}
-  basicUnsafeGrow v by
-    = do
-        v' <- basicUnsafeNew (n+by)
-        basicUnsafeCopy (basicUnsafeSlice 0 n v') v
-        return v'
-    where
-      n = basicLength v
--}
 
 -- ------------------
 -- Internal functions
@@ -327,16 +206,6 @@ munstream s = case upperBound (MBundle.size s) of
                Just n  -> munstreamMax     s n
                Nothing -> munstreamUnknown s
 
--- FIXME: I can't think of how to prevent GHC from floating out
--- unstreamUnknown. That is bad because SpecConstr then generates two
--- specialisations: one for when it is called from unstream (it doesn't know
--- the shape of the vector) and one for when the vector has grown. To see the
--- problem simply compile this:
---
--- fromList = Data.Vector.Unboxed.unstream . Bundle.fromList
---
--- I'm not sure this still applies (19/04/2010)
-
 munstreamMax :: (PrimMonad m, MVector v a)
              => MBundle m u a -> Int -> m (v (PrimState m) a)
 {-# INLINE munstreamMax #-}
@@ -391,16 +260,6 @@ vmunstream :: (PrimMonad m, V.Vector v a)
 vmunstream s = case upperBound (MBundle.size s) of
                Just n  -> vmunstreamMax     s n
                Nothing -> vmunstreamUnknown s
-
--- FIXME: I can't think of how to prevent GHC from floating out
--- unstreamUnknown. That is bad because SpecConstr then generates two
--- specialisations: one for when it is called from unstream (it doesn't know
--- the shape of the vector) and one for when the vector has grown. To see the
--- problem simply compile this:
---
--- fromList = Data.Vector.Unboxed.unstream . Bundle.fromList
---
--- I'm not sure this still applies (19/04/2010)
 
 vmunstreamMax :: (PrimMonad m, V.Vector v a)
               => MBundle m v a -> Int -> m (V.Mutable v (PrimState m) a)
@@ -519,10 +378,16 @@ slice :: MVector v a
 slice i n v = BOUNDS_CHECK(checkSlice) "slice" i n (length v)
             $ unsafeSlice i n v
 
+-- | Take @n@ first elements of the mutable vector without making a
+-- copy. For negative @n@ empty vector is returned. If @n@ is larger
+-- than vector's length empty vector is returned,
 take :: MVector v a => Int -> v s a -> v s a
 {-# INLINE take #-}
 take n v = unsafeSlice 0 (min (max n 0) (length v)) v
 
+-- | Drop @n@ first element of the mutable vector without making a
+-- copy. For negative @n@ vector is returned unchanged and if @n@ is
+-- larger than vector's length empty vector is returned.
 drop :: MVector v a => Int -> v s a -> v s a
 {-# INLINE drop #-}
 drop n v = unsafeSlice (min m n') (max 0 (m - n')) v
@@ -540,10 +405,14 @@ splitAt n v = ( unsafeSlice 0 m v
       n'  = max n 0
       len = length v
 
+-- | Drop last element of the mutable vector without making a copy. If
+-- vector is empty exception is thrown.
 init :: MVector v a => v s a -> v s a
 {-# INLINE init #-}
 init v = slice 0 (length v - 1) v
 
+-- | Drop first element of the mutable vector without making a copy. If
+-- vector is empty exception is thrown.
 tail :: MVector v a => v s a -> v s a
 {-# INLINE tail #-}
 tail v = slice 1 (length v - 1) v
@@ -558,18 +427,24 @@ unsafeSlice :: MVector v a => Int  -- ^ starting index
 unsafeSlice i n v = UNSAFE_CHECK(checkSlice) "unsafeSlice" i n (length v)
                   $ basicUnsafeSlice i n v
 
+-- | Same as 'init' but doesn't do range checks.
 unsafeInit :: MVector v a => v s a -> v s a
 {-# INLINE unsafeInit #-}
 unsafeInit v = unsafeSlice 0 (length v - 1) v
 
+-- | Same as 'tail' but doesn't do range checks.
 unsafeTail :: MVector v a => v s a -> v s a
 {-# INLINE unsafeTail #-}
 unsafeTail v = unsafeSlice 1 (length v - 1) v
 
+-- | Unsafe variant of 'take'. If called with out of range @n@ it will
+-- simply create invalid slice that likely violate memory safety
 unsafeTake :: MVector v a => Int -> v s a -> v s a
 {-# INLINE unsafeTake #-}
 unsafeTake n v = unsafeSlice 0 n v
 
+-- | Unsafe variant of 'drop'. If called with out of range @n@ it will
+-- simply create invalid slice that likely violate memory safety
 unsafeDrop :: MVector v a => Int -> v s a -> v s a
 {-# INLINE unsafeDrop #-}
 unsafeDrop n v = unsafeSlice n (length v - n) v
@@ -591,7 +466,14 @@ new :: (PrimMonad m, MVector v a) => Int -> m (v (PrimState m) a)
 new n = BOUNDS_CHECK(checkLength) "new" n
       $ unsafeNew n >>= \v -> basicInitialize v >> return v
 
--- | Create a mutable vector of the given length. The memory is not initialized.
+-- | Create a mutable vector of the given length. The vector content
+--   should be presumed uninitialized. However exact semantics depends
+--   on vector implementation. For example unboxed and storable
+--   vectors will create vector filled with whatever underlying memory
+--   buffer happens to contain, while boxed vector's elements are
+--   initialized to bottoms which will throw exception when evaluated.
+--
+-- @since 0.4
 unsafeNew :: (PrimMonad m, MVector v a) => Int -> m (v (PrimState m) a)
 {-# INLINE unsafeNew #-}
 unsafeNew n = UNSAFE_CHECK(checkLength) "unsafeNew" n
@@ -609,6 +491,30 @@ replicateM :: (PrimMonad m, MVector v a) => Int -> m a -> m (v (PrimState m) a)
 {-# INLINE replicateM #-}
 replicateM n m = munstream (MBundle.replicateM n m)
 
+-- | /O(n)/ Create a mutable vector of the given length (0 if the length is negative)
+-- and fill it with the results of applying the function to each index.
+--
+-- @since 0.12.3.0
+generate :: (PrimMonad m, MVector v a) => Int -> (Int -> a) -> m (v (PrimState m) a)
+{-# INLINE generate #-}
+generate n f = stToPrim $ generateM n (return . f)
+
+-- | /O(n)/ Create a mutable vector of the given length (0 if the length is
+-- negative) and fill it with the results of applying the monadic function to each
+-- index. Iteration starts at index 0.
+--
+-- @since 0.12.3.0
+generateM :: (PrimMonad m, MVector v a) => Int -> (Int -> m a) -> m (v (PrimState m) a)
+{-# INLINE generateM #-}
+generateM n f
+  | n <= 0    = new 0
+  | otherwise = do
+      vec <- new n
+      let loop i | i >= n    = return vec
+                 | otherwise = do unsafeWrite vec i =<< f i
+                                  loop (i + 1)
+      loop 0
+
 -- | Create a copy of a mutable vector.
 clone :: (PrimMonad m, MVector v a) => v (PrimState m) a -> m (v (PrimState m) a)
 {-# INLINE clone #-}
@@ -620,8 +526,18 @@ clone v = do
 -- Growing
 -- -------
 
--- | Grow a vector by the given number of elements. The number must be
--- positive.
+-- | Grow a vector by the given number of elements. The number must not be
+-- negative otherwise error is thrown. Semantics of this function is exactly the
+-- same as `unsafeGrow`, except that it will initialize the newly
+-- allocated memory first.
+--
+-- It is important to note that mutating the returned vector will not affect the
+-- vector that was used as a source. In other words it does not, nor will it
+-- ever have the semantics of @realloc@ from C.
+--
+-- > grow mv 0 === clone mv
+--
+-- @since 0.4.0
 grow :: (PrimMonad m, MVector v a)
                 => v (PrimState m) a -> Int -> m (v (PrimState m) a)
 {-# INLINE grow #-}
@@ -630,6 +546,10 @@ grow v by = BOUNDS_CHECK(checkLength) "grow" by
                basicInitialize $ basicUnsafeSlice (length v) by vnew
                return vnew
 
+-- | Same as `grow`, except that it copies data towards the end of the newly
+-- allocated vector making extra space available at the beginning.
+--
+-- @since 0.11.0.0
 growFront :: (PrimMonad m, MVector v a)
                 => v (PrimState m) a -> Int -> m (v (PrimState m) a)
 {-# INLINE growFront #-}
@@ -661,14 +581,39 @@ enlargeFront v = do
   where
     by = enlarge_delta v
 
--- | Grow a vector by the given number of elements. The number must be
--- positive but this is not checked.
-unsafeGrow :: (PrimMonad m, MVector v a)
-                        => v (PrimState m) a -> Int -> m (v (PrimState m) a)
+-- | Grow a vector by allocating a new mutable vector of the same size plus the
+-- the given number of elements and copying all the data over to the new vector
+-- starting at its beginning. The newly allocated memory is not initialized and
+-- the extra space at the end will likely contain garbage data or uninitialzed
+-- error. Use `unsafeGrowFront` to make the extra space available in the front
+-- of the new vector.
+--
+-- It is important to note that mutating the returned vector will not affect
+-- elements of the vector that was used as a source. In other words it does not,
+-- nor will it ever have the semantics of @realloc@ from C. Keep in mind,
+-- however, that values themselves can be of a mutable type
+-- (eg. `Foreign.Ptr.Ptr`), in which case it would be possible to affect values
+-- stored in both vectors.
+--
+-- > unsafeGrow mv 0 === clone mv
+--
+-- @since 0.4.0
+unsafeGrow ::
+     (PrimMonad m, MVector v a)
+  => v (PrimState m) a
+  -- ^ A mutable vector to copy the data from.
+  -> Int
+  -- ^ Number of elements to grow the vector by. It must be non-negative but
+  -- this is not checked.
+  -> m (v (PrimState m) a)
 {-# INLINE unsafeGrow #-}
 unsafeGrow v n = UNSAFE_CHECK(checkLength) "unsafeGrow" n
                $ basicUnsafeGrow v n
 
+-- | Same as `unsafeGrow`, except that it copies data towards the end of the
+-- newly allocated vector making extra space available at the beginning.
+--
+-- @since 0.11.0.0
 unsafeGrowFront :: (PrimMonad m, MVector v a)
                         => v (PrimState m) a -> Int -> m (v (PrimState m) a)
 {-# INLINE unsafeGrowFront #-}
@@ -709,6 +654,14 @@ modify :: (PrimMonad m, MVector v a) => v (PrimState m) a -> (a -> a) -> Int -> 
 modify v f i = BOUNDS_CHECK(checkIndex) "modify" i (length v)
              $ unsafeModify v f i
 
+-- | Modify the element at the given position using a monadic function.
+--
+-- @since 0.12.3.0
+modifyM :: (PrimMonad m, MVector v a) => v (PrimState m) a -> (a -> m a) -> Int -> m ()
+{-# INLINE modifyM #-}
+modifyM v f i = BOUNDS_CHECK(checkIndex) "modifyM" i (length v)
+              $ unsafeModifyM v f i
+
 -- | Swap the elements at the given positions.
 swap :: (PrimMonad m, MVector v a) => v (PrimState m) a -> Int -> Int -> m ()
 {-# INLINE swap #-}
@@ -742,6 +695,15 @@ unsafeModify v f i = UNSAFE_CHECK(checkIndex) "unsafeModify" i (length v)
                    $ basicUnsafeRead v i >>= \x ->
                      basicUnsafeWrite v i (f x)
 
+-- | Modify the element at the given position using a monadic
+-- function. No bounds checks are performed.
+--
+-- @since 0.12.3.0
+unsafeModifyM :: (PrimMonad m, MVector v a) => v (PrimState m) a -> (a -> m a) -> Int -> m ()
+{-# INLINE unsafeModifyM #-}
+unsafeModifyM v f i = UNSAFE_CHECK(checkIndex) "unsafeModifyM" i (length v)
+                    $ stToPrim . basicUnsafeWrite v i =<< f =<< stToPrim (basicUnsafeRead v i)
+
 -- | Swap the elements at the given positions. No bounds checks are performed.
 unsafeSwap :: (PrimMonad m, MVector v a)
                 => v (PrimState m) a -> Int -> Int -> m ()
@@ -764,6 +726,182 @@ unsafeExchange v i x = UNSAFE_CHECK(checkIndex) "unsafeExchange" i (length v)
                          y <- unsafeRead v i
                          unsafeWrite v i x
                          return y
+
+-- Folds
+-- -----
+
+forI_ :: (Monad m, MVector v a) => v (PrimState m) a -> (Int -> m b) -> m ()
+{-# INLINE forI_ #-}
+forI_ v f = loop 0
+  where
+    loop i | i >= n    = return ()
+           | otherwise = f i >> loop (i + 1)
+    n = length v
+
+-- | /O(n)/ Apply the monadic action to every element of the vector, discarding the results.
+--
+-- @since 0.12.3.0
+mapM_ :: (PrimMonad m, MVector v a) => (a -> m b) -> v (PrimState m) a -> m ()
+{-# INLINE mapM_ #-}
+mapM_ f v = forI_ v $ \i -> f =<< unsafeRead v i
+
+-- | /O(n)/ Apply the monadic action to every element of the vector and its index, discarding the results.
+--
+-- @since 0.12.3.0
+imapM_ :: (PrimMonad m, MVector v a) => (Int -> a -> m b) -> v (PrimState m) a -> m ()
+{-# INLINE imapM_ #-}
+imapM_ f v = forI_ v $ \i -> f i =<< unsafeRead v i
+
+-- | /O(n)/ Apply the monadic action to every element of the vector,
+-- discarding the results. It's same as the @flip mapM_@.
+--
+-- @since 0.12.3.0
+forM_ :: (PrimMonad m, MVector v a) => v (PrimState m) a -> (a -> m b) -> m ()
+{-# INLINE forM_ #-}
+forM_ = flip mapM_
+
+-- | /O(n)/ Apply the monadic action to every element of the vector
+-- and its index, discarding the results. It's same as the @flip imapM_@.
+--
+-- @since 0.12.3.0
+iforM_ :: (PrimMonad m, MVector v a) => v (PrimState m) a -> (Int -> a -> m b) -> m ()
+{-# INLINE iforM_ #-}
+iforM_ = flip imapM_
+
+-- | /O(n)/ Pure left fold.
+--
+-- @since 0.12.3.0
+foldl :: (PrimMonad m, MVector v a) => (b -> a -> b) -> b -> v (PrimState m) a -> m b
+{-# INLINE foldl #-}
+foldl f = ifoldl (\b _ -> f b)
+
+-- | /O(n)/ Pure left fold with strict accumulator.
+--
+-- @since 0.12.3.0
+foldl' :: (PrimMonad m, MVector v a) => (b -> a -> b) -> b -> v (PrimState m) a -> m b
+{-# INLINE foldl' #-}
+foldl' f = ifoldl' (\b _ -> f b)
+
+-- | /O(n)/ Pure left fold (function applied to each element and its index).
+--
+-- @since 0.12.3.0
+ifoldl :: (PrimMonad m, MVector v a) => (b -> Int -> a -> b) -> b -> v (PrimState m) a -> m b
+{-# INLINE ifoldl #-}
+ifoldl f b0 v = stToPrim $ ifoldM (\b i a -> return $ f b i a) b0 v
+
+-- | /O(n)/ Pure left fold with strict accumulator (function applied to each element and its index).
+--
+-- @since 0.12.3.0
+ifoldl' :: (PrimMonad m, MVector v a) => (b -> Int -> a -> b) -> b -> v (PrimState m) a -> m b
+{-# INLINE ifoldl' #-}
+ifoldl' f b0 v = stToPrim $ ifoldM' (\b i a -> return $ f b i a) b0 v
+
+-- | /O(n)/ Pure right fold.
+--
+-- @since 0.12.3.0
+foldr :: (PrimMonad m, MVector v a) => (a -> b -> b) -> b -> v (PrimState m) a -> m b
+{-# INLINE foldr #-}
+foldr f = ifoldr (const f)
+
+-- | /O(n)/ Pure right fold with strict accumulator.
+--
+-- @since 0.12.3.0
+foldr' :: (PrimMonad m, MVector v a) => (a -> b -> b) -> b -> v (PrimState m) a -> m b
+{-# INLINE foldr' #-}
+foldr' f = ifoldr' (const f)
+
+-- | /O(n)/ Pure right fold (function applied to each element and its index).
+--
+-- @since 0.12.3.0
+ifoldr :: (PrimMonad m, MVector v a) => (Int -> a -> b -> b) -> b -> v (PrimState m) a -> m b
+{-# INLINE ifoldr #-}
+ifoldr f b0 v = stToPrim $ ifoldrM (\i a b -> return $ f i a b) b0 v
+
+-- | /O(n)/ Pure right fold with strict accumulator (function applied
+-- to each element and its index).
+--
+-- @since 0.12.3.0
+ifoldr' :: (PrimMonad m, MVector v a) => (Int -> a -> b -> b) -> b -> v (PrimState m) a -> m b
+{-# INLINE ifoldr' #-}
+ifoldr' f b0 v = stToPrim $ ifoldrM' (\i a b -> return $ f i a b) b0 v
+
+-- | /O(n)/ Monadic fold.
+--
+-- @since 0.12.3.0
+foldM :: (PrimMonad m, MVector v a) => (b -> a -> m b) -> b -> v (PrimState m) a -> m b
+{-# INLINE foldM #-}
+foldM f = ifoldM (\x _ -> f x)
+
+-- | /O(n)/ Monadic fold with strict accumulator.
+--
+-- @since 0.12.3.0
+foldM' :: (PrimMonad m, MVector v a) => (b -> a -> m b) -> b -> v (PrimState m) a -> m b
+{-# INLINE foldM' #-}
+foldM' f = ifoldM' (\x _ -> f x)
+
+-- | /O(n)/ Monadic fold (action applied to each element and its index).
+--
+-- @since 0.12.3.0
+ifoldM :: (PrimMonad m, MVector v a) => (b -> Int -> a -> m b) -> b -> v (PrimState m) a -> m b
+{-# INLINE ifoldM #-}
+ifoldM f b0 v = loop 0 b0
+  where
+    loop i b | i >= n    = return b
+             | otherwise = do a <- unsafeRead v i
+                              loop (i + 1) =<< f b i a
+    n = length v
+
+-- | /O(n)/ Monadic fold with strict accumulator (action applied to each element and its index).
+--
+-- @since 0.12.3.0
+ifoldM' :: (PrimMonad m, MVector v a) => (b -> Int -> a -> m b) -> b -> v (PrimState m) a -> m b
+{-# INLINE ifoldM' #-}
+ifoldM' f b0 v = loop 0 b0
+  where
+    loop i !b | i >= n    = return b
+              | otherwise = do a <- unsafeRead v i
+                               loop (i + 1) =<< f b i a
+    n = length v
+
+-- | /O(n)/ Monadic right fold.
+--
+-- @since 0.12.3.0
+foldrM :: (PrimMonad m, MVector v a) => (a -> b -> m b) -> b -> v (PrimState m) a -> m b
+{-# INLINE foldrM #-}
+foldrM f = ifoldrM (const f)
+
+-- | /O(n)/ Monadic right fold with strict accumulator.
+--
+-- @since 0.12.3.0
+foldrM' :: (PrimMonad m, MVector v a) => (a -> b -> m b) -> b -> v (PrimState m) a -> m b
+{-# INLINE foldrM' #-}
+foldrM' f = ifoldrM' (const f)
+
+-- | /O(n)/ Monadic right fold (action applied to each element and its index).
+--
+-- @since 0.12.3.0
+ifoldrM :: (PrimMonad m, MVector v a) => (Int -> a -> b -> m b) -> b -> v (PrimState m) a -> m b
+{-# INLINE ifoldrM #-}
+ifoldrM f b0 v = loop (n-1) b0
+  where
+    loop i b | i < 0     = return b
+             | otherwise = do a <- unsafeRead v i
+                              loop (i - 1) =<< f i a b
+    n = length v
+
+-- | /O(n)/ Monadic right fold with strict accumulator (action applied
+-- to each element and its index).
+--
+-- @since 0.12.3.0
+ifoldrM' :: (PrimMonad m, MVector v a) => (Int -> a -> b -> m b) -> b -> v (PrimState m) a -> m b
+{-# INLINE ifoldrM' #-}
+ifoldrM' f b0 v = loop (n-1) b0
+  where
+    loop i !b | i < 0     = return b
+              | otherwise = do a <- unsafeRead v i
+                               loop (i - 1) =<< f i a b
+    n = length v
+
 
 -- Filling and copying
 -- -------------------

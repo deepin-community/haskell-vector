@@ -6,23 +6,25 @@ module Tests.Vector.UnitTests (tests) where
 import Control.Applicative as Applicative
 import Control.Exception
 import Control.Monad.Primitive
+import Control.Monad.Fix (mfix)
 import Data.Int
 import Data.Word
 import Data.Typeable
 import qualified Data.List as List
 import qualified Data.Vector.Generic  as Generic
 import qualified Data.Vector as Boxed
+import qualified Data.Vector.Internal.Check as Check
+import qualified Data.Vector.Mutable as MBoxed
 import qualified Data.Vector.Primitive as Primitive
 import qualified Data.Vector.Storable as Storable
 import qualified Data.Vector.Unboxed as Unboxed
-import qualified Data.Vector         as Vector
 import Foreign.Ptr
 import Foreign.Storable
 import Text.Printf
 
 import Test.Tasty
-import Test.Tasty.HUnit (testCase,Assertion, assertBool, (@=?), assertFailure)
--- import Test.HUnit ()
+import Test.Tasty.HUnit (testCase, Assertion, assertBool, assertEqual, (@=?), assertFailure)
+
 
 newtype Aligned a = Aligned { getAligned :: a }
 
@@ -42,6 +44,12 @@ checkAddressAlignment xs = Storable.unsafeWith xs $ \ptr -> do
   where
     dummy :: a
     dummy = undefined
+
+withBoundsChecksOnly :: [TestTree] -> [TestTree]
+withBoundsChecksOnly ts =
+  if Check.doChecks Check.Bounds
+     then ts
+     else []
 
 tests :: [TestTree]
 tests =
@@ -66,19 +74,25 @@ tests =
       , regression188 ([] :: [Char])
       ]
     ]
-  , testGroup "Negative tests"
-    [ testGroup "slice out of bounds #257"
+  , testGroup "Negative tests" $
+    withBoundsChecksOnly [ testGroup "slice out of bounds #257"
       [ testGroup "Boxed" $ testsSliceOutOfBounds Boxed.slice
       , testGroup "Primitive" $ testsSliceOutOfBounds Primitive.slice
       , testGroup "Storable" $ testsSliceOutOfBounds Storable.slice
       , testGroup "Unboxed" $ testsSliceOutOfBounds Unboxed.slice
-      ]
-    , testGroup "take #282"
+      ]]
+    ++
+    [ testGroup "take #282"
       [ testCase "Boxed" $ testTakeOutOfMemory Boxed.take
       , testCase "Primitive" $ testTakeOutOfMemory Primitive.take
       , testCase "Storable" $ testTakeOutOfMemory Storable.take
       , testCase "Unboxed" $ testTakeOutOfMemory Unboxed.take
       ]
+    ]
+  , testGroup "Data.Vector"
+    [ testCase "MonadFix" checkMonadFix
+    , testCase "toFromArray" toFromArray
+    , testCase "toFromMutableArray" toFromMutableArray
     ]
   ]
 
@@ -141,7 +155,7 @@ regression188
   :: forall proxy a. (Typeable a, Enum a, Bounded a, Eq a, Show a)
   => proxy a -> TestTree
 regression188 _ = testCase (show (typeOf (undefined :: a)))
-  $ Vector.fromList [maxBound::a] @=? Vector.enumFromTo maxBound maxBound
+  $ Boxed.fromList [maxBound::a] @=? Boxed.enumFromTo maxBound maxBound
 {-# INLINE regression188 #-}
 
 alignedDoubleVec :: Storable.Vector (Aligned Double)
@@ -157,3 +171,45 @@ _f :: (Generic.Vector v a, Generic.Vector w a, PrimMonad f)
    => Generic.Mutable v (PrimState f) a -> f (w a)
 _f v = Generic.convert `fmap` Generic.unsafeFreeze v
 #endif
+
+checkMonadFix :: Assertion
+checkMonadFix = assertBool "checkMonadFix" $
+    Boxed.toList fewV == fewL &&
+    Boxed.toList none == []
+  where
+    facty _ 0 = 1; facty f n = n * f (n - 1)
+    fewV :: Boxed.Vector Int
+    fewV = fmap ($ 12) $ mfix (\i -> Boxed.fromList [facty i, facty (+1), facty (+2)])
+    fewL :: [Int]
+    fewL = fmap ($ 12) $ mfix (\i -> [facty i, facty (+1), facty (+2)])
+    none :: Boxed.Vector Int
+    none = mfix (const Boxed.empty)
+
+mkArrayRoundtrip :: (String -> Boxed.Vector Integer -> Assertion) -> Assertion
+mkArrayRoundtrip mkAssertion =
+  sequence_
+    [ mkAssertion name v
+    | (name, v) <-
+        [ ("full", vec)
+        , ("slicedTail", Boxed.slice 0 (n - 3) vec)
+        , ("slicedHead", Boxed.slice 2 (n - 2) vec)
+        , ("slicedBoth", Boxed.slice 2 (n - 4) vec)
+        ]
+    ]
+  where
+    vec = Boxed.fromList [0 .. 10]
+    n = Boxed.length vec
+
+toFromArray :: Assertion
+toFromArray =
+  mkArrayRoundtrip $ \name v ->
+    assertEqual name v $ Boxed.fromArray (Boxed.toArray v)
+
+toFromMutableArray :: Assertion
+toFromMutableArray = mkArrayRoundtrip assetRoundtrip
+  where
+    assetRoundtrip assertionName vec = do
+      mvec <- Boxed.unsafeThaw vec
+      mvec' <- MBoxed.fromMutableArray =<< MBoxed.toMutableArray mvec
+      vec' <- Boxed.unsafeFreeze mvec'
+      assertEqual assertionName vec vec'
